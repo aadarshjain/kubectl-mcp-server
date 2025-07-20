@@ -30,8 +30,7 @@ This MCP server provides a seamless interface between LLMs (like Claude) and Kub
 kubectl-mcp-server/
 ├── README.md                  # Project documentation
 ├── requirements.txt           # Python dependencies
-└── src/
-    └── server.py              # Main server application with FastMCP setup
+└── server.py                  # Main server application with FastMCP setup
 ```
 
 ## Features
