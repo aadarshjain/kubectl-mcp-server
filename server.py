@@ -18,6 +18,9 @@ batchV1 = None
 networkingV1 = None
 customObjectsApi = None
 
+# Global variable to track current kubectl context
+current_kubectl_context = None
+
 def initialize_clients():
     """Initialize or reinitialize all Kubernetes API clients."""
     global coreV1, appsV1, batchV1, networkingV1, customObjectsApi
@@ -91,9 +94,27 @@ def switch_context(context: str):
         Returns: {"message": "Switched to context: dev-cluster"}
     """
     try:
+        global current_kubectl_context
+        
+        # First, switch the kubectl config context permanently
+        subprocess.run(
+            ["kubectl", "config", "use-context", context],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        logger.info(f"kubectl config switched to: {context}")
+        
+        # Then load the kube config for Python client
         config.load_kube_config(context=context)
         initialize_clients()  # Reinitialize clients with new context
+        current_kubectl_context = context  # Track the current context globally
+        
+        logger.info(f"Successfully switched to context: {context}")
         return {"message": f"Switched to context: {context}"}
+    except subprocess.CalledProcessError as cmd_error:
+        logger.error(f"Error switching kubectl context: {cmd_error.stderr}")
+        return {"error": f"kubectl context switch failed: {cmd_error.stderr}"}
     except Exception as e:
         logger.error(f"Error switching context to {context}: {e}")
         return {"error": str(e)}
@@ -124,9 +145,18 @@ def run_kubectl_command(command: str):
         Returns: "deployment.apps/nginx scaled"
     """
     try:
+        global current_kubectl_context
+        
         # Check if command starts with kubectl
         if not command.startswith("kubectl "):
             return "Error: Command must start with 'kubectl'"
+        
+        # Add context flag if a context has been switched and --context is not already in command
+        if current_kubectl_context and "--context" not in command:
+            command_parts = command.split()
+            command_parts.insert(1, f"--context={current_kubectl_context}")
+            command = " ".join(command_parts)
+            logger.info(f"Using context: {current_kubectl_context} for command: {command}")
         
         # Execute the full command as provided
         result = subprocess.run(
@@ -176,6 +206,8 @@ def run_kubectl_command_ro(command: str):
         Returns: "NAME    READY   STATUS    RESTARTS   AGE\nnginx   1/1     Running   0          2d"
     """
     try:
+        global current_kubectl_context
+        
         # Check if command starts with kubectl
         if not command.startswith("kubectl "):
             return "Error: Command must start with 'kubectl'"
@@ -200,17 +232,31 @@ def run_kubectl_command_ro(command: str):
         if not is_allowed or has_disallowed:
             return "Error: Only read-only kubectl commands are allowed (get, describe, etc.)"
 
+        # Add context flag if a context has been switched and --context is not already in command
+        if current_kubectl_context and "--context" not in command:
+            command_parts = command.split()
+            command_parts.insert(1, f"--context={current_kubectl_context}")
+            command = " ".join(command_parts)
+            logger.info(f"Modified command with context: {command}")
+        else:
+            logger.info(f"No context modification needed. Context: {current_kubectl_context}, has --context: {'--context' in command}")
+
         # Execute the full command as provided
+        logger.info(f"Executing command: {command}")
         result = subprocess.run(
             command.split(),
             capture_output=True,
             text=True,
             check=True
         )
+        logger.info(f"Command successful, output length: {len(result.stdout)} characters")
         return result.stdout
     except subprocess.CalledProcessError as e:
         logger.error(f"Error running kubectl command: {e.stderr}")
         return f"Error: {e.stderr}"
+    except Exception as e:
+        logger.error(f"Unexpected error in run_kubectl_command_ro: {e}")
+        return f"Error: {e}"
     
 # main entry point to run the MCP server
 
